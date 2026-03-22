@@ -3,7 +3,8 @@ import React, {Context} from "react";
 import {Content} from "../types";
 import {getDupeContent, getSampleContent, ignoreMedia, unIgnoreMedia} from "../util/api";
 
-export const PAGE_SIZE: number = Number(process.env.REACT_APP_PAGE_SIZE) || 10;
+// Number of parallel page requests to Plex. Keep low to avoid upstream timeouts.
+export const PAGE_SIZE: number = Number(process.env.REACT_APP_PAGE_SIZE) || 3;
 
 export class ContentStore {
   @observable.deep
