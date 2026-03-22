@@ -155,7 +155,7 @@ class CleanarrCli:
     def delete_media(self, media_id):
         content_key = self.items_obj[media_id]["dupe"]["key"]
         library_name = self.items_obj[media_id]["dupe"]["library"]
-        print(f"Deleting {media_id} {content_key} in {library_name}".format(media_id))
+        print(f"Deleting {media_id} {content_key} in {library_name}")
         return self.wrapper.delete_media(
             library_name=library_name, content_key=content_key, media_id=media_id
         )
