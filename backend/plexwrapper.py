@@ -134,7 +134,7 @@ class PlexWrapper(object):
         for section in self._get_sections():
             for mediaContent in section.all():
                 samples = []
-                if mediaContent.TYPE != 'movie' or mediaContent.TYPE != 'episode':
+                if mediaContent.TYPE != 'movie' and mediaContent.TYPE != 'episode':
                     continue
                 for media in mediaContent.media:
                     if media.duration is None or media.duration < (5 * 60 * 1000):
