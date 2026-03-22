@@ -20,6 +20,24 @@ logger = get_logger(__name__)
 _plex_url = os.environ.get("PLEX_BASE_URL", "")
 PLEX_HOST = urlparse(_plex_url).hostname if _plex_url else None
 
+# Cached singleton instances — avoid reconnecting to Plex on every request
+_plex_wrapper = None
+_database = None
+
+
+def get_plex_wrapper():
+    global _plex_wrapper
+    if _plex_wrapper is None:
+        _plex_wrapper = PlexWrapper()
+    return _plex_wrapper
+
+
+def get_database():
+    global _database
+    if _database is None:
+        _database = Database()
+    return _database
+
 
 @app.errorhandler(Exception)
 def internal_error(error):
@@ -29,7 +47,7 @@ def internal_error(error):
 
 @app.route("/server/info")
 def get_server_info():
-    info = PlexWrapper().get_server_info()
+    info = get_plex_wrapper().get_server_info()
     return jsonify(info)
 
 
@@ -56,26 +74,26 @@ def get_server_thumbnail():
     # is viewing the cleanarr dash over HTTPS to avoid the browser
     # blocking untrusted server certs
     content_key = urllib.parse.unquote(request.args.get('content_key'))
-    url = PlexWrapper().get_thumbnail_url(content_key)
+    url = get_plex_wrapper().get_thumbnail_url(content_key)
     r = requests.get(url)
     return send_file(io.BytesIO(r.content), mimetype='image/jpeg')
 
 @app.route("/content/dupes")
 def get_dupes():
     page = int(request.args.get("page", 1))
-    dupes = PlexWrapper().get_dupe_content(page)
+    dupes = get_plex_wrapper().get_dupe_content(page)
     return jsonify(dupes)
 
 
 @app.route("/content/samples")
 def get_samples():
-    samples = PlexWrapper().get_content_sample_files()
+    samples = get_plex_wrapper().get_content_sample_files()
     return jsonify(samples)
 
 
 @app.route("/server/deleted-sizes")
 def get_deleted_sizes():
-    sizes = PlexWrapper().get_deleted_sizes()
+    sizes = get_plex_wrapper().get_deleted_sizes()
     return jsonify(sizes)
 
 
@@ -86,7 +104,7 @@ def delete_media():
     content_key = content["content_key"]
     media_id = content["media_id"]
 
-    PlexWrapper().delete_media(library_name, content_key, media_id)
+    get_plex_wrapper().delete_media(library_name, content_key, media_id)
 
     return jsonify({"success": True})
 
@@ -96,8 +114,7 @@ def add_ignored_item():
     content = request.get_json()
     content_key = content["content_key"]
 
-    db = Database()
-    db.add_ignored_item(content_key)
+    get_database().add_ignored_item(content_key)
 
     return jsonify({"success": True})
 
@@ -107,8 +124,7 @@ def remove_ignored_item():
     content = request.get_json()
     content_key = content["content_key"]
 
-    db = Database()
-    db.remove_ignored_item(content_key)
+    get_database().remove_ignored_item(content_key)
 
     return jsonify({"success": True})
 
