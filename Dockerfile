@@ -5,6 +5,8 @@ WORKDIR /frontend
 COPY ./frontend /frontend
 
 ENV REACT_APP_BACKEND_URL="/"
+# CRA 3 uses webpack 4 which requires OpenSSL legacy provider on Node 17+
+ENV NODE_OPTIONS="--openssl-legacy-provider"
 
 RUN yarn install && yarn build
 
