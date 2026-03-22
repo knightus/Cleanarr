@@ -27,3 +27,7 @@ RUN mkdir -p $CONFIG_DIR
 
 # copied from here: https://github.com/se1exin/Cleanarr/issues/135#issuecomment-2091709103
 RUN echo "buffer-size=32768" >> /app/uwsgi.ini
+
+# Increase nginx upstream timeout for slow Plex queries on large libraries
+RUN echo "proxy_read_timeout 300s;" >> /etc/nginx/conf.d/timeout.conf && \
+    echo "uwsgi_read_timeout 300s;" >> /etc/nginx/conf.d/timeout.conf
