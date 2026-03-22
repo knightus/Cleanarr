@@ -1,6 +1,7 @@
 import io
 import os
 import urllib
+from urllib.parse import urlparse
 
 import requests as requests
 from flask import Flask, jsonify, request, send_file
@@ -14,6 +15,10 @@ app = Flask(__name__)
 CORS(app)
 
 logger = get_logger(__name__)
+
+# Extract Plex server hostname for proxy URL validation
+_plex_url = os.environ.get("PLEX_BASE_URL", "")
+PLEX_HOST = urlparse(_plex_url).hostname if _plex_url else None
 
 
 @app.errorhandler(Exception)
@@ -30,10 +35,18 @@ def get_server_info():
 
 @app.route("/server/proxy")
 def get_server_proxy():
-    # Proxy a request to the server - useful when the user
+    # Proxy a request to the Plex server - useful when the user
     # is viewing the cleanarr dash over HTTPS to avoid the browser
     # blocking untrusted server certs
     url = request.args.get('url')
+    if not url:
+        return jsonify({"error": "Missing url parameter"}), 400
+
+    # Validate URL points to the configured Plex server to prevent SSRF
+    parsed = urlparse(url)
+    if not PLEX_HOST or parsed.hostname != PLEX_HOST:
+        return jsonify({"error": "URL must point to the configured Plex server"}), 403
+
     r = requests.get(url)
     return send_file(io.BytesIO(r.content), mimetype='image/jpeg')
 
