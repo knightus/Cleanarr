@@ -46,7 +46,10 @@ export class ContentStore {
     return this.items.length;
   }
 
-  // Case-insensitive substring match against `title` + `seriesTitle`.
+  // Case-insensitive substring match against `title`, `seriesTitle`, and
+  // every file path in `media.parts[].file`. File-path matching covers the
+  // case where the show name on disk differs from the Plex `seriesTitle`
+  // (e.g. release-group prefixes / different romanizations).
   // Whitespace-only filterText is treated as "no filter" (RED TEAM #7).
   @computed
   get visibleItems(): Content[] {
@@ -54,8 +57,15 @@ export class ContentStore {
     if (!q) return this.items;
     return this.items.filter(item => {
       const title = (item.title || '').toLowerCase();
+      if (title.includes(q)) return true;
       const series = (item.seriesTitle || '').toLowerCase();
-      return title.includes(q) || series.includes(q);
+      if (series.includes(q)) return true;
+      for (const media of item.media) {
+        for (const part of media.parts) {
+          if ((part.file || '').toLowerCase().includes(q)) return true;
+        }
+      }
+      return false;
     });
   }
 
