@@ -1,5 +1,5 @@
 import {majorScale, Pane, toaster} from "evergreen-ui";
-import {autorun} from "mobx";
+import {autorun, runInAction} from "mobx";
 import {Observer} from "mobx-react-lite";
 import React, {FunctionComponent, useCallback, useEffect, useState} from 'react';
 import {deletedMediaContext, mediaContext} from "../stores/MediaStore";
@@ -37,6 +37,9 @@ export const ContentPage:FunctionComponent<any> = () => {
 
   const onListingTypeChange = (listingType: string): void => {
     setListingType(listingType);
+    // RED TEAM #4: clear filter on tab switch so Samples doesn't inherit a
+    // stale "duplicates" filter and surface a misleading empty state.
+    contentStore.setFilterText('');
     onRefresh();
   };
 
@@ -78,6 +81,10 @@ export const ContentPage:FunctionComponent<any> = () => {
   const onRefresh = () => {
     mediaStore.reset();
     deletedMediaStore.reset();
+    // RED TEAM #4/#5: clear filter on every refresh path (manual + the 4.5s
+    // post-delete timer). Without this, filterText survives the race window
+    // and gives the user a stale view of the freshly-loaded data.
+    contentStore.setFilterText('');
     if (listingType === 'duplicate') {
       contentStore.loadDupeContent();
     } else if (listingType === 'sample') {
@@ -88,6 +95,35 @@ export const ContentPage:FunctionComponent<any> = () => {
 
   const onDeselectAll = () => {
     mediaStore.reset();
+  };
+
+  // VALIDATION #1: bulk-select every media of currently-visible items.
+  // Pure "select everything you see" — no smart-default skip-largest logic.
+  // RED TEAM #9: wrapped in runInAction so 100+ visible items produce a
+  // single MobX notification (one re-render) instead of N.
+  const onSelectVisible = () => {
+    runInAction(() => {
+      contentStore.visibleItems.forEach((movie: Content) => {
+        movie.media.forEach((media: Media) => {
+          mediaStore.addMedia(media);
+        });
+      });
+    });
+  };
+
+  // Scoped to filtered view: clears selections only for currently-visible
+  // items. Hidden-but-selected batches survive — that's the whole point of
+  // the multi-batch workflow.
+  const onDeselectVisible = () => {
+    runInAction(() => {
+      contentStore.visibleItems.forEach((movie: Content) => {
+        movie.media.forEach((media: Media) => {
+          if (media.id in mediaStore.media) {
+            mediaStore.removeMedia(media);
+          }
+        });
+      });
+    });
   };
 
   const onResetSelection = useCallback(() => {
@@ -119,12 +155,60 @@ export const ContentPage:FunctionComponent<any> = () => {
   }, [mediaStore, contentStore.items]);
 
 
+  // RED TEAM #1: replace the pre-existing dep-tracking autorun (which re-fired
+  // smart-defaults on every items change — ignore-toggle, delete-refresh, etc.,
+  // clobbering curated cross-filter batches) with a one-shot guard tied to the
+  // loading→ready transition. Smart-select runs once per load cycle.
   useEffect(() => {
-    // Determine the default media items to be removed
-    autorun(() => {
-      onResetSelection();
+    let hasAutoSelectedThisLoad = false;
+    const dispose = autorun(() => {
+      const isLoading = contentStore.loading;
+      if (isLoading) {
+        hasAutoSelectedThisLoad = false;
+        return;
+      }
+      if (!hasAutoSelectedThisLoad && contentStore.items.length > 0) {
+        hasAutoSelectedThisLoad = true;
+        onResetSelection();
+      }
     });
-  }, [onResetSelection]);
+    return dispose;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // RED TEAM #6: keep MediaStore selection in sync with the live content set.
+  // Drops orphans (Plex re-scan invalidated id, item ignored, item deleted
+  // upstream) so the "Selected: N" pill never lies.
+  useEffect(() => {
+    const dispose = autorun(() => {
+      mediaStore.reconcileWith(contentStore.content);
+    });
+    return dispose;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // RED TEAM #2: breakdown for the expanded delete-confirm dialog. Cumulative
+  // cross-filter selections make a bare "delete N items" prompt dangerous —
+  // user can forget what they selected three filters ago. Computed inside the
+  // inner Observer below (not useMemo) so MobX reactivity tracks it correctly:
+  // ContentPage itself only re-renders on listingType change, but the inner
+  // Observer re-renders on every relevant observable update.
+  const buildSelectedSummary = (): { title: string; fileCount: number; totalBytes: number }[] => {
+    const out: { title: string; fileCount: number; totalBytes: number }[] = [];
+    contentStore.items.forEach((movie: Content) => {
+      const matched = movie.media.filter(m => m.id in mediaStore.media);
+      if (matched.length === 0) return;
+      const label = movie.contentType === 'episode'
+        ? `${movie.seriesTitle ?? movie.title} ${movie.seasonEpisode ?? ''} — ${movie.title}`
+        : `${movie.title} (${movie.year})`;
+      out.push({
+        title: label,
+        fileCount: matched.length,
+        totalBytes: matched.reduce((acc, m) => acc + sumMediaSize(m), 0),
+      });
+    });
+    return out;
+  };
 
   const onInvertSelection = () => {
     contentStore.items.forEach(movie => {
@@ -186,15 +270,20 @@ export const ContentPage:FunctionComponent<any> = () => {
           loadingFailed={contentStore.loadingFailed}
           loadingError={contentStore.loadingError}
           listingType={listingType}
-          content={contentStore.items}
+          content={contentStore.visibleItems}
+          totalCount={contentStore.length}
+          isFiltered={contentStore.filterText.trim().length > 0}
           renderContentItem={renderMovieItem}
         />
       )}
     </Observer>
   );
 
-  const renderMovieItem = (movie: Content, key: number) => (
-    <Observer key={key}>
+  // RED TEAM #3: stable React key (Plex ratingKey) prevents reconciliation
+  // from reassigning a ContentItem's open dialog state to a different content
+  // when the filter narrows the visible list.
+  const renderMovieItem = (movie: Content) => (
+    <Observer key={movie.key}>
       {() => (
         <ContentItem
           addMedia={(media: Media) => mediaStore.addMedia(media)}
@@ -230,6 +319,12 @@ export const ContentPage:FunctionComponent<any> = () => {
             onResetSelection={onResetSelection}
             onInvertSelection={onInvertSelection}
             onChangeIncludeIgnored={onChangeIncludeIgnored}
+            filterText={contentStore.filterText}
+            onFilterChange={(v: string) => contentStore.setFilterText(v)}
+            visibleCount={contentStore.visibleLength}
+            onSelectVisible={onSelectVisible}
+            onDeselectVisible={onDeselectVisible}
+            selectedSummary={buildSelectedSummary()}
           />
         )}
       </Observer>

@@ -1,6 +1,6 @@
 import {action, computed, observable} from 'mobx';
 import React, {Context} from "react";
-import {Media} from "../types";
+import {Content, Media} from "../types";
 import {sumMediaSize} from "../util";
 import {deleteMedia} from "../util/api";
 
@@ -23,6 +23,21 @@ export class MediaStore {
   @action
   reset() {
     this.media = {};
+  }
+
+  // Drop selection entries whose media.id is no longer present in `content`.
+  // Plex re-scan / ignore-toggle / upstream delete can invalidate ids; without
+  // this, the "Selected: N" pill counts orphans and toasts overstate deletions.
+  @action
+  reconcileWith(content: Content[]) {
+    const liveIds = new Set<number>();
+    content.forEach(item => item.media.forEach(m => liveIds.add(m.id)));
+    Object.keys(this.media).forEach(idStr => {
+      const id = Number(idStr);
+      if (!liveIds.has(id)) {
+        delete this.media[id];
+      }
+    });
   }
 
   deleteMedia(libraryName: string, movieKey: string, media: Media): Promise<any> {

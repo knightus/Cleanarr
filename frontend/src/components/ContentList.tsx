@@ -8,7 +8,14 @@ type DupeMovieListProps = {
   loadingError: Error | null,
   listingType: string,
   content: Content[],
-  renderContentItem: (movie: Content, key: number) => JSX.Element
+  totalCount: number,
+  isFiltered: boolean,
+  // RED TEAM #3: callers must produce a stable React key (e.g. `movie.key`).
+  // The previous `(movie, index) => ...` signature let React reconcile two
+  // different content items onto the same DOM node when the filter narrowed
+  // the list, which could re-target an open per-item delete dialog at the
+  // wrong file.
+  renderContentItem: (movie: Content) => JSX.Element,
 }
 
 export const ContentList:FunctionComponent<DupeMovieListProps> = (props) => {
@@ -18,6 +25,8 @@ export const ContentList:FunctionComponent<DupeMovieListProps> = (props) => {
     loadingError,
     listingType,
     content,
+    totalCount,
+    isFiltered,
     renderContentItem
   } = props;
 
@@ -53,28 +62,34 @@ export const ContentList:FunctionComponent<DupeMovieListProps> = (props) => {
     )
   }
 
-  const renderEmptyMessage = () => (
-    <Pane
-      display="flex"
-      flexDirection={"column"}
-      alignItems="center"
-      background="tint2"
-      borderRadius={3}
-      padding={majorScale(2)}
-      marginY={majorScale(1)}
-    >
-      <Alert
-        intent="success"
-        title={`No ${listingType} content found`}
-      />
-    </Pane>
-  );
+  // Distinguish "no content at all" (success state — nothing to clean up) from
+  // "no items match your filter" (informational — try a different keyword).
+  // Without this, an over-aggressive filter looked identical to a clean library.
+  const renderEmptyMessage = () => {
+    const noMatches = isFiltered && totalCount > 0;
+    return (
+      <Pane
+        display="flex"
+        flexDirection={"column"}
+        alignItems="center"
+        background="tint2"
+        borderRadius={3}
+        padding={majorScale(2)}
+        marginY={majorScale(1)}
+      >
+        <Alert
+          intent={noMatches ? "warning" : "success"}
+          title={noMatches
+            ? "No items match your filter"
+            : `No ${listingType} content found`}
+        />
+      </Pane>
+    );
+  };
 
   const renderMovieList = () => (
     <>
-    {content.map((movie: Content, key: number) => (
-        renderContentItem(movie, key)
-    ))}
+    {content.map((movie: Content) => renderContentItem(movie))}
     </>
   );
 

@@ -22,6 +22,12 @@ export class ContentStore {
   @observable
   includeIgnored: boolean = false;
 
+  // Substring filter applied client-side to already-loaded `items`.
+  // Kept OUT of the `items` getter so the smart-default autorun in
+  // ContentPage does not re-fire on every keystroke.
+  @observable
+  filterText: string = '';
+
   @computed
   get items(): Content[] {
     if (this.includeIgnored) {
@@ -40,6 +46,24 @@ export class ContentStore {
     return this.items.length;
   }
 
+  // Case-insensitive substring match against `title` + `seriesTitle`.
+  // Whitespace-only filterText is treated as "no filter" (RED TEAM #7).
+  @computed
+  get visibleItems(): Content[] {
+    const q = this.filterText.trim().toLowerCase();
+    if (!q) return this.items;
+    return this.items.filter(item => {
+      const title = (item.title || '').toLowerCase();
+      const series = (item.seriesTitle || '').toLowerCase();
+      return title.includes(q) || series.includes(q);
+    });
+  }
+
+  @computed
+  get visibleLength(): number {
+    return this.visibleItems.length;
+  }
+
   @action
   setContent(movies: Content[]) {
     this.content = movies
@@ -48,6 +72,11 @@ export class ContentStore {
   @action
   setIncludeIgnore(value: boolean) {
     this.includeIgnored = value;
+  }
+
+  @action
+  setFilterText(value: string) {
+    this.filterText = value;
   }
 
   loadContent(handlerFn: () => Promise<any>): void {
