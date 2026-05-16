@@ -5,11 +5,21 @@ import {
   IconButton,
   majorScale,
   Pane,
+  Paragraph,
   Pill,
   SegmentedControl,
-  Spinner, Switch
+  Spinner,
+  Switch,
+  TextInput
 } from "evergreen-ui";
 import React, {FunctionComponent, useState} from "react";
+import {bytesToSize} from "../util";
+
+type SelectedSummaryRow = {
+  title: string,
+  fileCount: number,
+  totalBytes: number,
+};
 
 type DupeMovieTopBarProps = {
   loading: boolean,
@@ -27,6 +37,12 @@ type DupeMovieTopBarProps = {
   onResetSelection: () => void,
   onInvertSelection: () => void,
   onChangeIncludeIgnored: (value: boolean) => void,
+  filterText: string,
+  onFilterChange: (value: string) => void,
+  visibleCount: number,
+  onSelectVisible: () => void,
+  onDeselectVisible: () => void,
+  selectedSummary: SelectedSummaryRow[],
 }
 
 export const ContentTopBar:FunctionComponent<DupeMovieTopBarProps> = (props) => {
@@ -44,10 +60,23 @@ export const ContentTopBar:FunctionComponent<DupeMovieTopBarProps> = (props) => 
     onListingTypeChange,
     onDeselectAll,
     onResetSelection,
-    onInvertSelection
+    onInvertSelection,
+    filterText,
+    onFilterChange,
+    visibleCount,
+    onSelectVisible,
+    onDeselectVisible,
+    selectedSummary,
   } = props;
 
   const [showDeleteWarning, setShowDeleteWarning] = useState(false);
+
+  // RED TEAM #7: single source of truth for "is the filter actually active?".
+  // Trim guards against the whitespace-only case where the input has a stray
+  // space but the visibleItems result is identical to items — without this,
+  // "Showing X of Y" badge + clear icon + Deselect-Visible button all appear
+  // misleadingly while the list is unchanged.
+  const hasActiveFilter = filterText.trim().length > 0;
 
   const onClickConfirmDelete = () => {
     setShowDeleteWarning(false);
@@ -60,6 +89,48 @@ export const ContentTopBar:FunctionComponent<DupeMovieTopBarProps> = (props) => 
           borderRadius={3}
           padding={majorScale(2)}
     >
+      {/* VALIDATION #4: filter input lives in its own row above the existing
+          controls — most discoverable layout, no sticky-positioning complexity. */}
+      <Pane display="flex" alignItems="center" marginBottom={majorScale(1)}>
+        <TextInput
+          placeholder="Filter by title (e.g. 'resident')"
+          value={filterText}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onFilterChange(e.target.value)}
+          width={320}
+          marginRight={majorScale(1)}
+        />
+        {hasActiveFilter && (
+          <IconButton
+            icon="cross"
+            appearance="minimal"
+            onClick={() => onFilterChange('')}
+            marginRight={majorScale(2)}
+            title="Clear filter"
+          />
+        )}
+        {hasActiveFilter && (
+          <Heading size={100} marginRight={majorScale(2)}>
+            Showing {visibleCount} of {numContent}
+          </Heading>
+        )}
+        {hasActiveFilter && (
+          <Button
+            appearance="default"
+            intent="success"
+            onClick={onSelectVisible}
+            disabled={visibleCount === 0}
+            marginRight={majorScale(1)}
+          >Select Visible</Button>
+        )}
+        {hasActiveFilter && (
+          <Button
+            appearance="default"
+            intent="warning"
+            onClick={onDeselectVisible}
+            disabled={visibleCount === 0}
+          >Deselect Visible</Button>
+        )}
+      </Pane>
       <Pane display="flex">
         <Pane flex={1} alignItems="center" display="flex">
           <IconButton
@@ -147,15 +218,31 @@ export const ContentTopBar:FunctionComponent<DupeMovieTopBarProps> = (props) => 
         </Pane>
       </Pane>
     </Pane>
+      {/* RED TEAM #2: expanded confirm dialog. Bare "delete N items?" was
+          dangerous for cumulative cross-filter batches — user can permanently
+          delete files they forgot they selected across earlier filters. Now
+          they see every affected title before confirming. */}
       <Dialog
         isShown={showDeleteWarning}
-        title="Warning"
+        title="Confirm deletion"
         intent="danger"
-        confirmLabel="Delete Selected Items"
+        confirmLabel={`Delete ${numSelected} items`}
         onConfirm={onClickConfirmDelete}
         onCloseComplete={() => setShowDeleteWarning(false)}
       >
-        Are you sure you want to delete {numSelected} items?
+        <Paragraph marginBottom={majorScale(1)}>
+          You are about to permanently delete {numSelected} file{numSelected === 1 ? '' : 's'} across {selectedSummary.length} title{selectedSummary.length === 1 ? '' : 's'}. This cannot be undone.
+        </Paragraph>
+        <Pane maxHeight={300} overflowY="auto" border="muted" padding={majorScale(1)}>
+          {selectedSummary.map((row, i) => (
+            <Pane key={i} display="flex" justifyContent="space-between" paddingY={4}>
+              <Paragraph flex={1} marginRight={majorScale(1)}>{row.title}</Paragraph>
+              <Paragraph color="muted">
+                {row.fileCount} file{row.fileCount === 1 ? '' : 's'} &middot; {bytesToSize(row.totalBytes)}
+              </Paragraph>
+            </Pane>
+          ))}
+        </Pane>
       </Dialog>
     </>
   )
