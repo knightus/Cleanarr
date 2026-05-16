@@ -12,8 +12,14 @@ import {
   Switch,
   TextInput
 } from "evergreen-ui";
-import React, {FunctionComponent, useState} from "react";
+import React, {FunctionComponent, useEffect, useRef, useState} from "react";
 import {bytesToSize} from "../util";
+
+// Delay between the last keystroke and the actual filter recomputation.
+// Filtering against title + seriesTitle + every media.parts[].file across
+// 1000+ items per keystroke was sluggish in real-world use; debouncing pushes
+// the work outside the typing hot path.
+const FILTER_DEBOUNCE_MS = 200;
 
 type SelectedSummaryRow = {
   title: string,
@@ -40,8 +46,6 @@ type DupeMovieTopBarProps = {
   filterText: string,
   onFilterChange: (value: string) => void,
   visibleCount: number,
-  onSelectVisible: () => void,
-  onDeselectVisible: () => void,
   selectedSummary: SelectedSummaryRow[],
 }
 
@@ -64,18 +68,52 @@ export const ContentTopBar:FunctionComponent<DupeMovieTopBarProps> = (props) => 
     filterText,
     onFilterChange,
     visibleCount,
-    onSelectVisible,
-    onDeselectVisible,
     selectedSummary,
   } = props;
 
   const [showDeleteWarning, setShowDeleteWarning] = useState(false);
 
+  // Local input state is the immediate, every-keystroke value the user sees in
+  // the field. We mirror it to the store (which drives `visibleItems`) only
+  // after FILTER_DEBOUNCE_MS of quiet — that keeps typing snappy even with
+  // 1000+ items and filename-path matching enabled.
+  const [inputValue, setInputValue] = useState(filterText);
+  const debounceTimer = useRef<number | null>(null);
+
+  // External clears (refresh, listing-type change) push '' through the
+  // filterText prop. Reflect that back into the input so the field clears too.
+  useEffect(() => {
+    setInputValue(filterText);
+  }, [filterText]);
+
+  useEffect(() => {
+    if (debounceTimer.current !== null) {
+      window.clearTimeout(debounceTimer.current);
+    }
+    if (inputValue === filterText) return; // nothing to flush
+    debounceTimer.current = window.setTimeout(() => {
+      onFilterChange(inputValue);
+    }, FILTER_DEBOUNCE_MS);
+    return () => {
+      if (debounceTimer.current !== null) {
+        window.clearTimeout(debounceTimer.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputValue]);
+
+  const clearFilter = () => {
+    setInputValue('');
+    if (debounceTimer.current !== null) {
+      window.clearTimeout(debounceTimer.current);
+    }
+    onFilterChange('');
+  };
+
   // RED TEAM #7: single source of truth for "is the filter actually active?".
-  // Trim guards against the whitespace-only case where the input has a stray
-  // space but the visibleItems result is identical to items — without this,
-  // "Showing X of Y" badge + clear icon + Deselect-Visible button all appear
-  // misleadingly while the list is unchanged.
+  // Driven by the *committed* filterText (post-debounce), not the live input.
+  // The "Showing X of Y" badge appearing mid-keystroke would otherwise lie
+  // about the still-pending visibleCount.
   const hasActiveFilter = filterText.trim().length > 0;
 
   const onClickConfirmDelete = () => {
@@ -90,20 +128,22 @@ export const ContentTopBar:FunctionComponent<DupeMovieTopBarProps> = (props) => 
           padding={majorScale(2)}
     >
       {/* VALIDATION #4: filter input lives in its own row above the existing
-          controls — most discoverable layout, no sticky-positioning complexity. */}
+          controls — most discoverable layout, no sticky-positioning complexity.
+          Match scope: title + seriesTitle + every media.parts[].file (so users
+          can search by filename when Plex metadata diverges from disk names). */}
       <Pane display="flex" alignItems="center" marginBottom={majorScale(1)}>
         <TextInput
-          placeholder="Filter by title (e.g. 'resident')"
-          value={filterText}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onFilterChange(e.target.value)}
+          placeholder="Filter by title, show, or filename"
+          value={inputValue}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setInputValue(e.target.value)}
           width={320}
           marginRight={majorScale(1)}
         />
-        {hasActiveFilter && (
+        {inputValue.trim().length > 0 && (
           <IconButton
             icon="cross"
             appearance="minimal"
-            onClick={() => onFilterChange('')}
+            onClick={clearFilter}
             marginRight={majorScale(2)}
             title="Clear filter"
           />
@@ -112,23 +152,6 @@ export const ContentTopBar:FunctionComponent<DupeMovieTopBarProps> = (props) => 
           <Heading size={100} marginRight={majorScale(2)}>
             Showing {visibleCount} of {numContent}
           </Heading>
-        )}
-        {hasActiveFilter && (
-          <Button
-            appearance="default"
-            intent="success"
-            onClick={onSelectVisible}
-            disabled={visibleCount === 0}
-            marginRight={majorScale(1)}
-          >Select Visible</Button>
-        )}
-        {hasActiveFilter && (
-          <Button
-            appearance="default"
-            intent="warning"
-            onClick={onDeselectVisible}
-            disabled={visibleCount === 0}
-          >Deselect Visible</Button>
         )}
       </Pane>
       <Pane display="flex">

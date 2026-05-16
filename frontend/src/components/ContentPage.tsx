@@ -1,5 +1,5 @@
 import {majorScale, Pane, toaster} from "evergreen-ui";
-import {autorun, runInAction} from "mobx";
+import {autorun} from "mobx";
 import {Observer} from "mobx-react-lite";
 import React, {FunctionComponent, useCallback, useEffect, useState} from 'react';
 import {deletedMediaContext, mediaContext} from "../stores/MediaStore";
@@ -95,35 +95,6 @@ export const ContentPage:FunctionComponent<any> = () => {
 
   const onDeselectAll = () => {
     mediaStore.reset();
-  };
-
-  // VALIDATION #1: bulk-select every media of currently-visible items.
-  // Pure "select everything you see" — no smart-default skip-largest logic.
-  // RED TEAM #9: wrapped in runInAction so 100+ visible items produce a
-  // single MobX notification (one re-render) instead of N.
-  const onSelectVisible = () => {
-    runInAction(() => {
-      contentStore.visibleItems.forEach((movie: Content) => {
-        movie.media.forEach((media: Media) => {
-          mediaStore.addMedia(media);
-        });
-      });
-    });
-  };
-
-  // Scoped to filtered view: clears selections only for currently-visible
-  // items. Hidden-but-selected batches survive — that's the whole point of
-  // the multi-batch workflow.
-  const onDeselectVisible = () => {
-    runInAction(() => {
-      contentStore.visibleItems.forEach((movie: Content) => {
-        movie.media.forEach((media: Media) => {
-          if (media.id in mediaStore.media) {
-            mediaStore.removeMedia(media);
-          }
-        });
-      });
-    });
   };
 
   const onResetSelection = useCallback(() => {
@@ -322,8 +293,6 @@ export const ContentPage:FunctionComponent<any> = () => {
             filterText={contentStore.filterText}
             onFilterChange={(v: string) => contentStore.setFilterText(v)}
             visibleCount={contentStore.visibleLength}
-            onSelectVisible={onSelectVisible}
-            onDeselectVisible={onDeselectVisible}
             selectedSummary={buildSelectedSummary()}
           />
         )}
