@@ -15,6 +15,13 @@ import {
 import React, {FunctionComponent, useEffect, useRef, useState} from "react";
 import {bytesToSize} from "../util";
 
+type SelectedRelease = {
+  filename: string,
+  videoSize: string,
+  sizeBytes: number,
+};
+
+
 // Delay between the last keystroke and the actual filter recomputation.
 // Filtering against title + seriesTitle + every media.parts[].file across
 // 1000+ items per keystroke was sluggish in real-world use; debouncing pushes
@@ -23,13 +30,17 @@ const FILTER_DEBOUNCE_MS = 200;
 
 type SelectedSummaryRow = {
   title: string,
+  context: string,
   fileCount: number,
   totalBytes: number,
+  releases: SelectedRelease[],
 };
 
 type DupeMovieTopBarProps = {
   loading: boolean,
   deleting: boolean,
+  deleteDone: number,
+  deleteTotal: number,
   includeIgnored: boolean,
   numContent: number,
   numSelected: number,
@@ -53,6 +64,8 @@ export const ContentTopBar:FunctionComponent<DupeMovieTopBarProps> = (props) => 
   const {
     loading,
     deleting,
+    deleteDone,
+    deleteTotal,
     includeIgnored,
     numContent,
     numSelected,
@@ -203,7 +216,7 @@ export const ContentTopBar:FunctionComponent<DupeMovieTopBarProps> = (props) => 
               disabled={true}
             >
               <Spinner size={16} marginRight={8}/>
-              Deleting Items
+              {deleteTotal > 0 ? `Deleting ${deleteDone} of ${deleteTotal}…` : 'Deleting Items'}
             </Button>
             :
             <Button
@@ -256,13 +269,38 @@ export const ContentTopBar:FunctionComponent<DupeMovieTopBarProps> = (props) => 
         <Paragraph marginBottom={majorScale(1)}>
           You are about to permanently delete {numSelected} file{numSelected === 1 ? '' : 's'} across {selectedSummary.length} title{selectedSummary.length === 1 ? '' : 's'}. This cannot be undone.
         </Paragraph>
-        <Pane maxHeight={300} overflowY="auto" border="muted" padding={majorScale(1)}>
+        <Pane maxHeight={320} overflowY="auto" border="muted" padding={majorScale(1)}>
           {selectedSummary.map((row, i) => (
-            <Pane key={i} display="flex" justifyContent="space-between" paddingY={4}>
-              <Paragraph flex={1} marginRight={majorScale(1)}>{row.title}</Paragraph>
-              <Paragraph color="muted">
-                {row.fileCount} file{row.fileCount === 1 ? '' : 's'} &middot; {bytesToSize(row.totalBytes)}
-              </Paragraph>
+            <Pane
+              key={i}
+              paddingY={majorScale(1)}
+              borderBottom={i < selectedSummary.length - 1 ? 'muted' : undefined}
+            >
+              <Pane display="flex" justifyContent="space-between">
+                <Paragraph flex={1} marginRight={majorScale(1)} fontWeight={500}>{row.title}</Paragraph>
+                <Paragraph color="muted">
+                  {row.fileCount} file{row.fileCount === 1 ? '' : 's'} &middot; {bytesToSize(row.totalBytes)}
+                </Paragraph>
+              </Pane>
+              {row.context && (
+                <Paragraph size={300} color="muted">{row.context}</Paragraph>
+              )}
+              {row.releases.map((rel, j) => (
+                <Pane
+                  key={j}
+                  display="flex"
+                  justifyContent="space-between"
+                  paddingLeft={majorScale(2)}
+                  paddingTop={majorScale(1) / 2}
+                >
+                  <Paragraph size={300} flex={1} marginRight={majorScale(1)} wordBreak="break-all">
+                    {rel.filename}
+                  </Paragraph>
+                  <Paragraph size={300} color="muted" whiteSpace="nowrap">
+                    {rel.videoSize} &middot; {bytesToSize(rel.sizeBytes)}
+                  </Paragraph>
+                </Pane>
+              ))}
             </Pane>
           ))}
         </Pane>
