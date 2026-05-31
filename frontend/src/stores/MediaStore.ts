@@ -10,6 +10,42 @@ export class MediaStore {
 
   @observable isDeleting = false;
 
+  // Live progress for a bulk delete. `deleteTotal` is the number of releases
+  // queued when the batch starts; `deleteCompleted`/`deleteFailed` tick up as
+  // each per-release request settles, driving the "Deleting X of N…" button.
+  @observable deleteTotal = 0;
+  @observable deleteCompleted = 0;
+  @observable deleteFailed = 0;
+
+  @action
+  startDeleteProgress(total: number) {
+    this.isDeleting = true;
+    this.deleteTotal = total;
+    this.deleteCompleted = 0;
+    this.deleteFailed = 0;
+  }
+
+  @action
+  markDeleteCompleted() {
+    this.deleteCompleted += 1;
+  }
+
+  @action
+  markDeleteFailed() {
+    this.deleteFailed += 1;
+  }
+
+  @action
+  finishDeleteProgress() {
+    this.isDeleting = false;
+  }
+
+  // Total releases settled so far (succeeded + failed) — what the button shows.
+  @computed
+  get deleteSettled(): number {
+    return this.deleteCompleted + this.deleteFailed;
+  }
+
   @action
   addMedia(media: Media) {
     this.media[media.id] = media;

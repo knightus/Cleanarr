@@ -4,7 +4,7 @@ import {Observer} from "mobx-react-lite";
 import React, {FunctionComponent, useCallback, useEffect, useState} from 'react';
 import {deletedMediaContext, mediaContext} from "../stores/MediaStore";
 import {Media, Content} from "../types";
-import {bytesToSize, sumMediaSize} from "../util";
+import {bytesToSize, fileBasename, sumMediaSize} from "../util";
 import {ContentItem} from "./ContentItem";
 import {ContentList} from "./ContentList";
 import {ContentTopBar} from "./ContentTopBar";
@@ -44,33 +44,64 @@ export const ContentPage:FunctionComponent<any> = () => {
   };
 
   const onDeleteMedia = () => {
-    toaster.warning(`Deleting ${mediaStore.length} items...`, {
-      duration: 5,
+    const total = mediaStore.length;
+    mediaStore.startDeleteProgress(total);
+    toaster.warning(`Deleting ${total} item${total === 1 ? '' : 's'}...`, {
+      duration: 60,
       id: 'delete-toaster'
     });
 
-    let promises: Promise<any>[] = [];
+    // Freed space is summed locally from the releases we actually delete, so
+    // the completion toast can report it without a round-trip.
+    let freedBytes = 0;
+    const deletions: Promise<any>[] = [];
 
-    mediaStore.isDeleting = true;
     contentStore.items.forEach(movie => {
       movie.media.forEach(media => {
         if (media.id in mediaStore.media) {
-          promises.push(
-            mediaStore.deleteMedia(movie.library, movie.key, media).then(() => {
-              deletedMediaStore.addMedia(media);
-            })
-          )
+          deletions.push(
+            mediaStore.deleteMedia(movie.library, movie.key, media)
+              .then(() => {
+                deletedMediaStore.addMedia(media);
+                freedBytes += sumMediaSize(media);
+                mediaStore.markDeleteCompleted();
+              })
+              // A single failed delete must not reject the whole batch and
+              // strand the spinner — count it and keep going.
+              .catch(() => {
+                mediaStore.markDeleteFailed();
+              })
+              .finally(() => {
+                // Tick the toast live as each release settles. evergreen
+                // replaces the same-id toast, so the count updates in place.
+                const done = mediaStore.deleteSettled;
+                toaster.warning(
+                  `Deleting… ${done} of ${total} done, ${total - done} left`,
+                  {duration: 60, id: 'delete-toaster'}
+                );
+              })
+          );
         }
       });
-      promises.push(serverInfoStore.loadDeletedSizes());
     });
 
-    Promise.all(promises).then(() => {
-      mediaStore.isDeleting = false;
-      toaster.success(`All items deleted!`, {
-        duration: 5,
-        id: 'delete-toaster'
-      });
+    Promise.all(deletions).then(() => {
+      mediaStore.finishDeleteProgress();
+      serverInfoStore.loadDeletedSizes();
+
+      const ok = mediaStore.deleteCompleted;
+      const failed = mediaStore.deleteFailed;
+      if (failed > 0) {
+        toaster.warning(
+          `Deleted ${ok} file${ok === 1 ? '' : 's'} (freed ${bytesToSize(freedBytes)}), ${failed} failed.`,
+          {duration: 8, id: 'delete-toaster'}
+        );
+      } else {
+        toaster.success(
+          `Deleted ${ok} file${ok === 1 ? '' : 's'} — freed ${bytesToSize(freedBytes)}!`,
+          {duration: 5, id: 'delete-toaster'}
+        );
+      }
 
       setTimeout(() => {
         onRefresh();
@@ -164,18 +195,43 @@ export const ContentPage:FunctionComponent<any> = () => {
   // inner Observer below (not useMemo) so MobX reactivity tracks it correctly:
   // ContentPage itself only re-renders on listingType change, but the inner
   // Observer re-renders on every relevant observable update.
-  const buildSelectedSummary = (): { title: string; fileCount: number; totalBytes: number }[] => {
-    const out: { title: string; fileCount: number; totalBytes: number }[] = [];
+  const buildSelectedSummary = (): {
+    title: string;
+    context: string;
+    fileCount: number;
+    totalBytes: number;
+    releases: { filename: string; videoSize: string; sizeBytes: number }[];
+  }[] => {
+    const out: {
+      title: string;
+      context: string;
+      fileCount: number;
+      totalBytes: number;
+      releases: { filename: string; videoSize: string; sizeBytes: number }[];
+    }[] = [];
     contentStore.items.forEach((movie: Content) => {
       const matched = movie.media.filter(m => m.id in mediaStore.media);
       if (matched.length === 0) return;
-      const label = movie.contentType === 'episode'
-        ? `${movie.seriesTitle ?? movie.title} ${movie.seasonEpisode ?? ''} — ${movie.title}`
-        : `${movie.title} (${movie.year})`;
+
+      // Title stays generic (e.g. "Episode 2 (2023)"); disambiguating context
+      // — series/season then library — goes on the line beneath it so users
+      // can tell which show/library a generic title belongs to.
+      const title = movie.year ? `${movie.title} (${movie.year})` : movie.title;
+      const contextParts: string[] = [];
+      if (movie.seriesTitle) contextParts.push(movie.seriesTitle);
+      if (movie.seasonEpisode) contextParts.push(movie.seasonEpisode);
+      if (movie.library) contextParts.push(movie.library);
+
       out.push({
-        title: label,
+        title,
+        context: contextParts.join(' · '),
         fileCount: matched.length,
         totalBytes: matched.reduce((acc, m) => acc + sumMediaSize(m), 0),
+        releases: matched.map(m => ({
+          filename: m.parts.map(p => fileBasename(p.file)).join(', '),
+          videoSize: m.width ? `${m.width} × ${m.height}` : '-',
+          sizeBytes: sumMediaSize(m),
+        })),
       });
     });
     return out;
@@ -277,6 +333,8 @@ export const ContentPage:FunctionComponent<any> = () => {
           <ContentTopBar
             loading={contentStore.loading}
             deleting={mediaStore.isDeleting}
+            deleteDone={mediaStore.deleteSettled}
+            deleteTotal={mediaStore.deleteTotal}
             includeIgnored={contentStore.includeIgnored}
             numContent={contentStore.length}
             numSelected={mediaStore.length}
