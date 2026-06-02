@@ -97,8 +97,15 @@ class PlexWrapper(object):
         # which can be useful when wanting to test the UI against a larger dataset
         if os.getenv("CHAOS_NOT_DUPLICATE", "0") == "1":
             duplicate=False
+        # A TV library section reports type "show"; its duplicates are searched
+        # at the episode level (libtype below). The serializer must follow the
+        # libtype, not section.type, or episodes get serialized as movies and
+        # lose seriesTitle / seasonEpisode / contentType.
+        libtype = section.type
+        if libtype == "show":
+            libtype = "episode"
         to_dict_func = self.movie_to_dict
-        if section.type == "episode":
+        if libtype == "episode":
             to_dict_func = self.episode_to_dict
         with ThreadPoolExecutor() as executor:
             futures = []
@@ -112,9 +119,6 @@ class PlexWrapper(object):
                 offset,
                 limit,
             )
-            libtype = section.type
-            if libtype == "show":
-                libtype = "episode"
             results = section.search(duplicate=duplicate, libtype=libtype, container_start=offset, limit=limit)
             for item in results:
                 if not duplicate or len(item.media) > 1:
