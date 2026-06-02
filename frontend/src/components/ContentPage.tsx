@@ -213,13 +213,19 @@ export const ContentPage:FunctionComponent<any> = () => {
       const matched = movie.media.filter(m => m.id in mediaStore.media);
       if (matched.length === 0) return;
 
-      // Title stays generic (e.g. "Episode 2 (2023)"); disambiguating context
-      // — series/season then library — goes on the line beneath it so users
-      // can tell which show/library a generic title belongs to.
-      const title = movie.year ? `${movie.title} (${movie.year})` : movie.title;
+      // Episodes lead with the show + episode code so a TV row is identifiable
+      // at a glance ("Smallville · S04E01 — Crusade"); the episode title alone
+      // (e.g. "Crusade (2004)") doesn't say which show it is. Falls back to the
+      // movie-style label when the series title is missing.
       const contextParts: string[] = [];
-      if (movie.seriesTitle) contextParts.push(movie.seriesTitle);
-      if (movie.seasonEpisode) contextParts.push(movie.seasonEpisode);
+      let title: string;
+      if (movie.contentType === 'episode' && movie.seriesTitle) {
+        const code = movie.seasonEpisode ? movie.seasonEpisode.toUpperCase() : '';
+        title = `${movie.seriesTitle}${code ? ` · ${code}` : ''} — ${movie.title}`;
+      } else {
+        title = movie.year ? `${movie.title} (${movie.year})` : movie.title;
+        if (movie.seasonEpisode) contextParts.push(movie.seasonEpisode.toUpperCase());
+      }
       if (movie.library) contextParts.push(movie.library);
 
       out.push({
